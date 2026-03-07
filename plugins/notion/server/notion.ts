@@ -3,7 +3,7 @@ import {
   APIResponseError,
   Client,
   isFullPage,
-  isFullPageOrDatabase,
+  isFullPageOrDataSource,
   isFullUser,
   RequestTimeoutError,
 } from "@notionhq/client";
@@ -192,7 +192,7 @@ export class NotionClient {
       );
 
       response.results.forEach((item) => {
-        if (!isFullPageOrDatabase(item)) {
+        if (!isFullPageOrDataSource(item)) {
           return;
         }
 
@@ -285,56 +285,74 @@ export class NotionClient {
   }
 
   private async queryDatabase(databaseId: string) {
+    // Resolve data source IDs from the database — the v2025-09-03 API
+    // requires data_source_id (not database_id) for dataSources.query().
+    // Multi-source databases have multiple data sources; query all of them.
+    const database = (await this.fetchWithRetry(() =>
+      this.client.databases.retrieve({ database_id: databaseId })
+    )) as DatabaseObjectResponse;
+
+    const dataSources: { id: string; name: string }[] =
+      (database as any).data_sources ?? [];
+    if (dataSources.length === 0) {
+      Logger.warn(
+        `Notion database ${databaseId} has no accessible data sources, skipping`
+      );
+      return [];
+    }
+
     const pages: Page[] = [];
 
-    let cursor: string | undefined;
-    let hasMore = true;
+    for (const dataSource of dataSources) {
+      let cursor: string | undefined;
+      let hasMore = true;
 
-    try {
-      while (hasMore) {
-        const response = await this.fetchWithRetry(() =>
-          this.client.databases.query({
-            database_id: databaseId,
-            filter_properties: ["title"],
-            start_cursor: cursor,
-            page_size: this.pageSize,
-          })
-        );
+      try {
+        while (hasMore) {
+          const response = await this.fetchWithRetry(() =>
+            this.client.dataSources.query({
+              data_source_id: dataSource.id,
+              filter_properties: ["title"],
+              start_cursor: cursor,
+              page_size: this.pageSize,
+            })
+          );
 
-        const pagesFromRes = compact(
-          response.results.map<Page | undefined>((item) => {
-            if (!isFullPage(item)) {
-              return;
-            }
+          const pagesFromRes = compact(
+            response.results.map<Page | undefined>((item) => {
+              if (!isFullPage(item)) {
+                return;
+              }
 
-            return {
-              type: PageType.Page,
-              id: item.id,
-              name: this.parseTitle(item, {
-                maxLength: DocumentValidation.maxTitleLength,
-              }),
-              emoji: this.parseEmoji(item),
-            };
-          })
-        );
+              return {
+                type: PageType.Page,
+                id: item.id,
+                name: this.parseTitle(item, {
+                  maxLength: DocumentValidation.maxTitleLength,
+                }),
+                emoji: this.parseEmoji(item),
+              };
+            })
+          );
 
-        pages.push(...pagesFromRes);
+          pages.push(...pagesFromRes);
 
-        hasMore = response.has_more;
-        cursor = response.next_cursor ?? undefined;
+          hasMore = response.has_more;
+          cursor = response.next_cursor ?? undefined;
+        }
+      } catch (error) {
+        if (
+          error instanceof APIResponseError &&
+          (error.code === APIErrorCode.ObjectNotFound ||
+            error.code === APIErrorCode.Unauthorized)
+        ) {
+          Logger.warn(
+            `Skipping Notion data source ${dataSource.id} for database ${databaseId} - Error code: ${error.code}`
+          );
+          continue;
+        }
+        throw error;
       }
-    } catch (error) {
-      if (
-        error instanceof APIResponseError &&
-        (error.code === APIErrorCode.ObjectNotFound ||
-          error.code === APIErrorCode.Unauthorized)
-      ) {
-        Logger.warn(
-          `Skipping Notion database query for ${databaseId} - Error code: ${error.code}`
-        );
-        return [];
-      }
-      throw error;
     }
 
     return pages;
@@ -369,13 +387,27 @@ export class NotionClient {
     databaseId: string,
     { titleMaxLength }: { titleMaxLength: number }
   ): Promise<PageInfo> {
+    // In API v2025-09-03, database metadata (created_by, properties, etc.)
+    // moved from databases.retrieve to dataSources.retrieve.
     const database = (await this.fetchWithRetry(() =>
       this.client.databases.retrieve({
         database_id: databaseId,
       })
     )) as DatabaseObjectResponse;
 
-    const author = await this.fetchUsername(database.created_by.id);
+    const dataSourceId = (database as any).data_sources?.[0]?.id;
+    const dataSource = dataSourceId
+      ? await this.fetchWithRetry(() =>
+          (this.client as any).dataSources.retrieve({
+            data_source_id: dataSourceId,
+          })
+        )
+      : undefined;
+
+    const source = dataSource || database;
+    const author = source.created_by
+      ? await this.fetchUsername(source.created_by.id)
+      : undefined;
 
     return {
       title: this.parseTitle(database, {

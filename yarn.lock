@@ -4574,13 +4574,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@notionhq/client@npm:^2.3.0":
-  version: 2.3.0
-  resolution: "@notionhq/client@npm:2.3.0"
-  dependencies:
-    "@types/node-fetch": "npm:^2.5.10"
-    node-fetch: "npm:^2.6.1"
-  checksum: 10c0/48af6e0d44c97892374755fbfbca6eb2f27e5ad8baabc511d48ec02cc7d6a1488b1692423ff426cb77c39ac5b4c9bd5498d4b6bc40e295d149ff3d24ce3d8ecc
+"@notionhq/client@npm:^5.6.0":
+  version: 5.6.0
+  resolution: "@notionhq/client@npm:5.6.0"
+  checksum: 10c0/38562ae0ffa6da8a3faebd858f2003ec07826d28cdbd0a93e4ac5f1175be535cfa2c7e27d9a1f107a29202792f6a20a6c1de8aef53242fdd02596a7f2db8a4bf
   languageName: node
   linkType: hard
 
@@ -8454,7 +8451,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/node-fetch@npm:^2.5.10, @types/node-fetch@npm:^2.6.9":
+"@types/node-fetch@npm:^2.6.9":
   version: 2.6.13
   resolution: "@types/node-fetch@npm:2.6.13"
   dependencies:
@@ -17558,7 +17555,7 @@ __metadata:
     "@linear/sdk": "npm:^58.1.0"
     "@modelcontextprotocol/sdk": "npm:^1.25.1"
     "@node-oauth/oauth2-server": "npm:^5.2.0"
-    "@notionhq/client": "npm:^2.3.0"
+    "@notionhq/client": "npm:^5.6.0"
     "@octokit/auth-app": "npm:^6.1.4"
     "@octokit/webhooks": "npm:^13.9.1"
     "@outlinewiki/koa-passport": "npm:^4.2.1"

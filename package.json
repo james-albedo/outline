@@ -80,7 +80,7 @@
     "@linear/sdk": "^58.1.0",
     "@modelcontextprotocol/sdk": "^1.25.1",
     "@node-oauth/oauth2-server": "^5.2.0",
-    "@notionhq/client": "^2.3.0",
+    "@notionhq/client": "^5.6.0",
     "@octokit/auth-app": "^6.1.4",
     "@octokit/webhooks": "^13.9.1",
     "@outlinewiki/koa-passport": "^4.2.1",
