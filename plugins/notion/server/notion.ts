@@ -2,6 +2,7 @@ import {
   APIErrorCode,
   APIResponseError,
   Client,
+  isFullDataSource,
   isFullPage,
   isFullPageOrDataSource,
   isFullUser,
@@ -231,8 +232,8 @@ export class NotionClient {
     const databaseInfo = await this.fetchDatabaseInfo(databaseId, {
       titleMaxLength,
     });
-    const pages = await this.queryDatabase(databaseId);
-    return { ...databaseInfo, pages };
+    const { pages, linkedTo } = await this.queryDatabase(databaseId);
+    return { ...databaseInfo, pages, linkedTo };
   }
 
   private async fetchBlockChildren(blockId: string) {
@@ -284,7 +285,9 @@ export class NotionClient {
     return blocks;
   }
 
-  private async queryDatabase(databaseId: string) {
+  private async queryDatabase(
+    databaseId: string
+  ): Promise<{ pages: Page[]; linkedTo?: string }> {
     // Resolve data source IDs from the database — the v2025-09-03 API
     // requires data_source_id (not database_id) for dataSources.query().
     // Multi-source databases have multiple data sources; query all of them.
@@ -292,18 +295,53 @@ export class NotionClient {
       this.client.databases.retrieve({ database_id: databaseId })
     )) as DatabaseObjectResponse;
 
-    const dataSources: { id: string; name: string }[] =
-      (database as any).data_sources ?? [];
+    const dataSources = database.data_sources ?? [];
     if (dataSources.length === 0) {
       Logger.warn(
         `Notion database ${databaseId} has no accessible data sources, skipping`
       );
-      return [];
+      return { pages: [] };
     }
 
     const pages: Page[] = [];
+    let linkedTo: string | undefined;
+    let allLinked = true;
 
     for (const dataSource of dataSources) {
+      // Check if this data source is a linked view of another database.
+      // Linked views have parent.type === "data_source_id" with the original
+      // database's ID — querying them returns duplicate rows.
+      try {
+        const dsInfo = await this.fetchWithRetry(() =>
+          this.client.dataSources.retrieve({
+            data_source_id: dataSource.id,
+          })
+        );
+        if (
+          isFullDataSource(dsInfo) &&
+          dsInfo.parent.type === "data_source_id"
+        ) {
+          Logger.info(
+            "task",
+            `Skipping linked data source ${dataSource.id} for database ${databaseId} — linked to original database ${dsInfo.parent.database_id}`
+          );
+          linkedTo = dsInfo.parent.database_id;
+          continue;
+        }
+      } catch (error) {
+        if (
+          error instanceof APIResponseError &&
+          (error.code === APIErrorCode.ObjectNotFound ||
+            error.code === APIErrorCode.Unauthorized)
+        ) {
+          // Can't determine link status — proceed with query
+        } else {
+          throw error;
+        }
+      }
+
+      allLinked = false;
+
       let cursor: string | undefined;
       let hasMore = true;
 
@@ -355,7 +393,12 @@ export class NotionClient {
       }
     }
 
-    return pages;
+    // If all data sources were linked views, return linkedTo so the caller
+    // can create a mention link instead of an empty document.
+    if (allLinked && linkedTo) {
+      return { pages: [], linkedTo };
+    }
+    return { pages };
   }
 
   private async fetchPageInfo(
@@ -395,19 +438,19 @@ export class NotionClient {
       })
     )) as DatabaseObjectResponse;
 
-    const dataSourceId = (database as any).data_sources?.[0]?.id;
+    const dataSourceId = database.data_sources?.[0]?.id;
     const dataSource = dataSourceId
       ? await this.fetchWithRetry(() =>
-          (this.client as any).dataSources.retrieve({
+          this.client.dataSources.retrieve({
             data_source_id: dataSourceId,
           })
         )
       : undefined;
 
-    const source = dataSource || database;
-    const author = source.created_by
-      ? await this.fetchUsername(source.created_by.id)
-      : undefined;
+    const author =
+      dataSource && isFullDataSource(dataSource) && dataSource.created_by
+        ? await this.fetchUsername(dataSource.created_by.id)
+        : undefined;
 
     return {
       title: this.parseTitle(database, {

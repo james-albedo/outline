@@ -1,6 +1,7 @@
 import { APIResponseError, APIErrorCode } from "@notionhq/client";
 import type { ImportTaskInput, ImportTaskOutput } from "@shared/schema";
 import type { IntegrationService, ProsemirrorDoc } from "@shared/types";
+import { MentionType } from "@shared/types";
 import { ProsemirrorHelper } from "@shared/utils/ProsemirrorHelper";
 import { CollectionValidation, DocumentValidation } from "@shared/validations";
 import Logger from "@server/logging/Logger";
@@ -111,15 +112,19 @@ export default class NotionAPIImportTask extends APIImportTask<IntegrationServic
     try {
       // Convert Notion database to an empty page with "pages in database" as its children.
       if (item.type === PageType.Database) {
-        const { pages, ...databaseInfo } = await client.fetchDatabase(
-          item.externalId,
-          { titleMaxLength }
-        );
+        const { pages, linkedTo, ...databaseInfo } =
+          await client.fetchDatabase(item.externalId, { titleMaxLength });
+
+        // Linked database view — create a mention link to the original database
+        // instead of re-importing all its rows (which would be duplicates).
+        const content = linkedTo
+          ? this.buildLinkedViewContent(linkedTo, databaseInfo.title)
+          : (ProsemirrorHelper.getEmptyDocument() as ProsemirrorDoc);
 
         return {
           ...databaseInfo,
           externalId: item.externalId,
-          content: ProsemirrorHelper.getEmptyDocument() as ProsemirrorDoc,
+          content,
           collectionExternalId,
           children: pages.map((page) => ({
             type: page.type,
@@ -193,5 +198,35 @@ export default class NotionAPIImportTask extends APIImportTask<IntegrationServic
     });
 
     return childPages;
+  }
+
+  /**
+   * Build ProseMirror content with a mention link to the original database.
+   * Used for linked database views to avoid duplicating rows.
+   * The mention is resolved to a clickable document link by
+   * updateMentionsAndAttachments() after the import completes.
+   */
+  private buildLinkedViewContent(
+    originalDatabaseId: string,
+    title: string
+  ): ProsemirrorDoc {
+    return {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "mention",
+              attrs: {
+                type: MentionType.Document,
+                modelId: originalDatabaseId,
+                label: title,
+              },
+            },
+          ],
+        },
+      ],
+    } as ProsemirrorDoc;
   }
 }
