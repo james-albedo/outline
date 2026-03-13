@@ -319,7 +319,8 @@ export class NotionClient {
         );
         if (
           isFullDataSource(dsInfo) &&
-          dsInfo.parent.type === "data_source_id"
+          dsInfo.parent.type === "database_id" &&
+          dsInfo.parent.database_id !== databaseId
         ) {
           Logger.info(
             "task",
